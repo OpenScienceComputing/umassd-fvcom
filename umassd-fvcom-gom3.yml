@@ -1,0 +1,46 @@
+# THIS FILE AUTO-GENERATED
+# This 'header' information needed to make this yml valid.  
+description: 'intake catalog example'
+metadata:
+  version: 1
+  description: "Intake Catalog for data from UMASSD-FVCOM model"
+
+sources:
+# If you are copy/paste-ing this entry to another catalog, you only need the 
+# lines from here down in your 'sources' section (be sure to indent as appropriate).
+  UMASSD-FVCOM-GOM3-zarr2:
+    driver: intake_xarray.xzarr.ZarrSource
+    description: 'UMASSD-FVCOM GOM3 Hindcast Archive'
+    args:
+      urlpath: ['reference://']
+      consolidated: false
+      drop_variables: dstart
+      decode_timedelta: false
+      storage_options:
+        target_options:
+          anon: true
+          skip_instance_cache: true
+        fo: s3://umassd-fvcom/gom3/hindcast/parquet/combined.parq
+        lazy: 'true'
+        remote_options:
+          anon: true
+          skip_instance_cache: true
+        remote_protocol: 's3'
+  UMASSD-FVCOM-GOM3-zarr3:
+    driver: intake_xarray.xzarr.ZarrSource
+    description: 'UMASSD-FVCOM GOM3 Hindcast Archive'
+    args:
+      urlpath: ['reference://']
+      consolidated: false
+      decode_timedelta: false
+      drop_variables: dstart
+      storage_options:
+        target_options:
+          anon: true
+        fo: s3://umassd-fvcom/gom3/hindcast/parquet/combined.parq
+        lazy: true
+        asynchronous: true
+        remote_options:
+          anon: true
+          asynchronous: true
+        remote_protocol: 's3'
