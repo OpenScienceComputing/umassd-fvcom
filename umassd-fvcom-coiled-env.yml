@@ -1,0 +1,29 @@
+name: umassd-fvcom
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=3.12
+  - cartopy
+  - cftime
+  - coiled
+  - datashader
+  - geoviews
+  - holoviews
+  - hvplot
+  - icechunk
+  - ipykernel
+  - jupyterlab
+  - kerchunk
+  - matplotlib
+  - numpy
+  - obstore
+  - pandas
+  - python-dotenv
+  - s3fs
+  - spatialpandas
+  - virtualizarr
+  - xarray
+  - zarr>=3
+  - pip:
+    - obspec-utils==0.9.0
