@@ -546,19 +546,26 @@ def arrow_layer(lon_min, lon_max, lat_min, lat_max,
     tidx = parse_time_to_index(time_str)
     try:
         lons, lats, gu, gv = build_arrow_grid(tidx, level, lon_min, lon_max, lat_min, lat_max)
-        mx, my = lonlat_to_merc(lons, lats)
-        angle = np.where(np.isnan(gu), 0., np.arctan2(gv, gu))
-        mag   = np.where(np.isnan(gu), 0., np.sqrt(gu**2 + gv**2))
-        # Filter out NaN positions (keep zero magnitudes, they will be invisible)
-        valid = ~(np.isnan(mx) | np.isnan(my))
-        mx, my, angle, mag = mx[valid], my[valid], angle[valid], mag[valid]
+        # Flatten to point-per-row, convert to Mercator, filter out-of-mesh NaNs
+        lon2d, lat2d = np.meshgrid(lons, lats)
+        lon_flat, lat_flat = lon2d.ravel(), lat2d.ravel()
+        mx, my = lonlat_to_merc(lon_flat, lat_flat)
+        gu_flat, gv_flat = gu.ravel(), gv.ravel()
+        mag_flat = np.sqrt(gu_flat**2 + gv_flat**2)
+        in_ocean = TRIFINDER(lon_flat, lat_flat) != -1
+        valid = ~(np.isnan(gu_flat) | np.isnan(gv_flat)) & (mag_flat > 0.01) & in_ocean
+        mx, my = mx[valid], my[valid]
+        gu_flat, gv_flat = gu_flat[valid], gv_flat[valid]
+        angle = np.arctan2(gv_flat, gu_flat)
+        mag   = mag_flat[valid]
+        max_mag = mag.max()
+        mag_norm = mag / max_mag if max_mag > 0 else mag
         return hv.VectorField(
-            (mx, my, angle, mag),
+            (mx, my, angle, mag_norm),
             kdims=["Longitude", "Latitude"],
             vdims=["Angle", "Magnitude"],
-        ).opts(color=curr_color, line_color=curr_color, fill_color=curr_color, alpha=0.8,
-               magnitude=hv.dim("Magnitude"), scale=vector_len,
-               apply_ranges=False)
+        ).opts(color=curr_color, line_color=curr_color, alpha=0.8,
+               scale=vector_len, apply_ranges=False)
     except Exception as e:
         print(f"[arrow] error: {e}")
         return hv.VectorField(_EMPTY_VF, kdims=["Longitude", "Latitude"],
