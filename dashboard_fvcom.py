@@ -177,15 +177,30 @@ CURLY_NX, CURLY_NY = 60, 60  # interpolation grid resolution
 TIMES = pd.DatetimeIndex(ds["time"].values)
 N_TIMES = len(TIMES)
 
+def parse_time_to_index(time_str):
+    try:
+        dt = pd.to_datetime(time_str)
+        # Find the closest time index
+        idx = np.argmin(np.abs(TIMES - dt))
+        return idx
+    except Exception as e:
+        print(f"Error parsing time '{time_str}': {e}. Using first time step.")
+        return 0
+
 # Widgets
 var_sel = pn.widgets.Select(name="Variable", options=list(VARS.keys()), value="temperature")
-time_sel = pn.widgets.IntSlider(name="Time", start=0, end=N_TIMES - 1, step=1, value=0)
-level_sel = pn.widgets.IntSlider(name="Level", start=0, end=max(ds.sizes.get("siglay", 1) - 1, 0), step=1, value=0)
-if "siglay" not in ds.dims:
-    level_sel.disabled = True
+time_sel = pn.widgets.TextInput(name="Time (YYYY-MM-DD HH:MM)", value=TIMES[0].strftime('%Y-%m-%d %H:%M'))
+_n_levels = ds.sizes.get("siglay", 1)
+level_sel = pn.widgets.Select(
+    name="Level",
+    options=list(range(_n_levels)),
+    value=0,
+    disabled="siglay" not in ds.dims,
+)
 
 cmap_sel = pn.widgets.Select(name="Palette", options=CMAPS, value="RdYlBu_r")
 curr_mode_sel = pn.widgets.Select(name="Currents overlay", options=CURR_MODES, value="None")
+curr_color_sel = pn.widgets.Select(name="Currents color", options=["white", "black", "red", "blue", "green"], value="white")
 vector_len_sl = pn.widgets.FloatSlider(name="Vector length", start=0.05, end=2.0,
                                        step=0.05, value=0.5)
 play_btn = pn.widgets.Toggle(name="▶ Play", button_type="success")
@@ -193,6 +208,10 @@ reset_btn = pn.widgets.Button(name="⟳ Reset range", button_type="primary", wid
 adaptive_cb = pn.widgets.Checkbox(name="Adaptive range", value=False)
 vmin_input = pn.widgets.FloatInput(name="Min", value=0.0, width=100)
 vmax_input = pn.widgets.FloatInput(name="Max", value=1.0, width=100)
+
+# Time navigation buttons
+prev_btn = pn.widgets.Button(name="◀ Prev", button_type="default", width=60)
+next_btn = pn.widgets.Button(name="Next ▶", button_type="default", width=60)
 
 _range_cache = {}
 _curly_cache = {}
@@ -364,7 +383,9 @@ def get_full_range(variable, level):
 
 
 def auto_range(event=None):
-    variable, tidx, level = var_sel.value, time_sel.value, level_sel.value
+    variable = var_sel.value
+    tidx = parse_time_to_index(time_sel.value)
+    level = level_sel.value
     if adaptive_cb.value:
         vals = get_values(variable, tidx, level)
         if hasattr(vals, "compute"):
@@ -383,11 +404,30 @@ def on_var_change(event):
     _range_cache.clear()
     auto_range()
 
+def on_time_change(event):
+    tidx = parse_time_to_index(event.new)
+    formatted = TIMES[tidx].strftime('%Y-%m-%d %H:%M')
+    if time_sel.value != formatted:
+        time_sel.value = formatted
+
+def prev_time(event):
+    tidx = parse_time_to_index(time_sel.value)
+    new_tidx = max(0, tidx - 1)
+    time_sel.value = TIMES[new_tidx].strftime('%Y-%m-%d %H:%M')
+
+def next_time(event):
+    tidx = parse_time_to_index(time_sel.value)
+    new_tidx = min(N_TIMES - 1, tidx + 1)
+    time_sel.value = TIMES[new_tidx].strftime('%Y-%m-%d %H:%M')
+
 var_sel.param.watch(on_var_change, "value")
 level_sel.param.watch(lambda e: auto_range(), "value")
 time_sel.param.watch(lambda e: auto_range() if adaptive_cb.value else None, "value")
+time_sel.param.watch(on_time_change, "value")
 adaptive_cb.param.watch(lambda e: auto_range(), "value")
 reset_btn.on_click(auto_range)
+prev_btn.on_click(prev_time)
+next_btn.on_click(next_time)
 auto_range()
 
 def get_slice_uda(variable, tidx, level):
@@ -418,16 +458,16 @@ def get_slice_uda(variable, tidx, level):
 
 PlotStream = hv.streams.Stream.define(
     "PlotStream",
-    variable="temperature", tidx=0, level=0, cmap="RdYlBu_r",
-    vmin=0.0, vmax=1.0, curr_mode="None", vector_len=0.5,
+    variable="temperature", time_str=TIMES[0].strftime('%Y-%m-%d %H:%M'), level=0, cmap="RdYlBu_r",
+    vmin=0.0, vmax=1.0, curr_mode="None", curr_color="white", vector_len=0.5,
 )
 ViewportStream = hv.streams.Stream.define("ViewportStream",
     lon_min=LON_MIN, lon_max=LON_MAX, lat_min=LAT_MIN, lat_max=LAT_MAX)
 
 _stream    = PlotStream(
-    variable=var_sel.value, tidx=time_sel.value, level=level_sel.value,
+    variable=var_sel.value, time_str=time_sel.value, level=level_sel.value,
     cmap=cmap_sel.value, vmin=vmin_input.value, vmax=vmax_input.value,
-    curr_mode=curr_mode_sel.value, vector_len=vector_len_sl.value,
+    curr_mode=curr_mode_sel.value, curr_color=curr_color_sel.value, vector_len=vector_len_sl.value,
 )
 _vp_stream = ViewportStream()
 _rxy_ref   = [None]
@@ -438,7 +478,8 @@ _last_zoom_t  = [0.0]
 
 _EMPTY_TIPS = {"Longitude": [], "Latitude": [], "angle": []}
 
-def field_layer(variable, tidx, level, cmap, vmin, vmax, curr_mode, vector_len):
+def field_layer(variable, time_str, level, cmap, vmin, vmax, curr_mode, curr_color, vector_len):
+    tidx = parse_time_to_index(time_str)
     da = get_slice_uda(variable, tidx, level)
     return da.hvplot.trimesh(
         geo=True, xlabel="", ylabel="",
@@ -446,7 +487,8 @@ def field_layer(variable, tidx, level, cmap, vmin, vmax, curr_mode, vector_len):
         ylim=(LAT_MIN - PAD, LAT_MAX + PAD),
     )
 
-def apply_style(el, variable, tidx, level, cmap, vmin, vmax, curr_mode, vector_len):
+def apply_style(el, variable, time_str, level, cmap, vmin, vmax, curr_mode, curr_color, vector_len):
+    tidx = parse_time_to_index(time_str)
     units, _, _, _ = VARS[variable]
     lv_str   = f" L{level}" if "siglay" in ds.dims else ""
     mode_str = f" | {curr_mode}" if curr_mode != "None" else ""
@@ -460,9 +502,10 @@ def apply_style(el, variable, tidx, level, cmap, vmin, vmax, curr_mode, vector_l
     ))
 
 def curly_layer(lon_min, lon_max, lat_min, lat_max,
-                variable, tidx, level, cmap, vmin, vmax, curr_mode, vector_len):
+                variable, time_str, level, cmap, vmin, vmax, curr_mode, curr_color, vector_len):
     if curr_mode != "Curly vectors":
         return hv.Path([], kdims=["Longitude", "Latitude"]).opts(apply_ranges=False)
+    tidx = parse_time_to_index(time_str)
     try:
         xs_ll, ys_ll, _, _, _ = build_curly_paths(
             tidx, level, vector_len, lon_min, lon_max, lat_min, lat_max)
@@ -471,14 +514,15 @@ def curly_layer(lon_min, lon_max, lat_min, lat_max,
             mx, my = lonlat_to_merc(np.array(xs), np.array(ys))
             paths.append(list(zip(mx.tolist(), my.tolist())))
         return hv.Path(paths, kdims=["Longitude", "Latitude"]).opts(
-            color="white", line_width=1.5, alpha=0.9, apply_ranges=False)
+            color=curr_color, line_width=1.5, alpha=0.9, apply_ranges=False)
     except Exception:
         return hv.Path([], kdims=["Longitude", "Latitude"]).opts(apply_ranges=False)
 
 def tips_layer(lon_min, lon_max, lat_min, lat_max,
-               variable, tidx, level, cmap, vmin, vmax, curr_mode, vector_len):
+               variable, time_str, level, cmap, vmin, vmax, curr_mode, curr_color, vector_len):
     if curr_mode != "Curly vectors":
         return hv.Points(_EMPTY_TIPS, kdims=["Longitude", "Latitude"], vdims=["angle"]).opts(apply_ranges=False)
+    tidx = parse_time_to_index(time_str)
     try:
         _, _, tlons, tlats, tangs = build_curly_paths(
             tidx, level, vector_len, lon_min, lon_max, lat_min, lat_max)
@@ -495,20 +539,24 @@ def tips_layer(lon_min, lon_max, lat_min, lat_max,
 _EMPTY_VF = (np.array([0.]), np.array([0.]), np.array([0.]), np.array([0.]))
 
 def arrow_layer(lon_min, lon_max, lat_min, lat_max,
-                variable, tidx, level, cmap, vmin, vmax, curr_mode, vector_len):
+                variable, time_str, level, cmap, vmin, vmax, curr_mode, curr_color, vector_len):
     if curr_mode != "Arrow plot":
         return hv.VectorField(_EMPTY_VF, kdims=["Longitude", "Latitude"],
                               vdims=["Angle", "Magnitude"]).opts(alpha=0, apply_ranges=False)
+    tidx = parse_time_to_index(time_str)
     try:
         lons, lats, gu, gv = build_arrow_grid(tidx, level, lon_min, lon_max, lat_min, lat_max)
         mx, my = lonlat_to_merc(lons, lats)
         angle = np.where(np.isnan(gu), 0., np.arctan2(gv, gu))
         mag   = np.where(np.isnan(gu), 0., np.sqrt(gu**2 + gv**2))
+        # Filter out NaN positions (keep zero magnitudes, they will be invisible)
+        valid = ~(np.isnan(mx) | np.isnan(my))
+        mx, my, angle, mag = mx[valid], my[valid], angle[valid], mag[valid]
         return hv.VectorField(
             (mx, my, angle, mag),
             kdims=["Longitude", "Latitude"],
             vdims=["Angle", "Magnitude"],
-        ).opts(color="white", alpha=0.8,
+        ).opts(color=curr_color, line_color=curr_color, fill_color=curr_color, alpha=0.8,
                magnitude=hv.dim("Magnitude"), scale=vector_len,
                apply_ranges=False)
     except Exception as e:
@@ -566,20 +614,20 @@ plot_pane = pn.pane.HoloViews(plot_obj, sizing_mode="stretch_both", min_height=6
 
 def refresh(*events):
     _stream.event(
-        variable=var_sel.value, tidx=time_sel.value, level=level_sel.value,
+        variable=var_sel.value, time_str=time_sel.value, level=level_sel.value,
         cmap=cmap_sel.value, vmin=vmin_input.value, vmax=vmax_input.value,
-        curr_mode=curr_mode_sel.value, vector_len=vector_len_sl.value,
+        curr_mode=curr_mode_sel.value, curr_color=curr_color_sel.value, vector_len=vector_len_sl.value,
     )
 
 for _w in [var_sel, time_sel, level_sel, cmap_sel, vmin_input, vmax_input,
-           curr_mode_sel, vector_len_sl]:
+           curr_mode_sel, curr_color_sel, vector_len_sl]:
     _w.param.watch(refresh, "value")
 
 sidebar = pn.Column(
     pn.pane.Markdown("## FVCOM GOM3 Explorer"),
     pn.Spacer(height=8),
     var_sel,
-    time_sel,
+    pn.Row(time_sel, pn.Spacer(width=5), prev_btn, next_btn),
     level_sel,
     pn.Spacer(height=8),
     cmap_sel,
@@ -587,6 +635,7 @@ sidebar = pn.Column(
     pn.Row(reset_btn, adaptive_cb),
     pn.Spacer(height=8),
     curr_mode_sel,
+    curr_color_sel,
     vector_len_sl,
     pn.Spacer(height=8),
     play_btn,
