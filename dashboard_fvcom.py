@@ -193,14 +193,13 @@ level_sel = pn.widgets.Select(
 
 cmap_sel = pn.widgets.Select(name="Palette", options=CMAPS, value="RdYlBu_r")
 curr_mode_sel = pn.widgets.Select(name="Currents overlay", options=CURR_MODES, value="None")
-curr_color_sel = pn.widgets.Select(name="Currents color", options=["white", "black", "red", "blue", "green"], value="white")
-vector_len_sl = pn.widgets.FloatSlider(name="Vector length", start=0.05, end=2.0,
-                                       step=0.05, value=0.5)
+curr_color_sel = pn.widgets.Select(name="Currents color", options=["black", "white", "red", "blue", "green"], value="black")
+vector_len_sl = pn.widgets.FloatSlider(name="Vector length", start=0.0, end=5.0,
+                                       step=0.5, value=2.0)
 play_btn = pn.widgets.Toggle(name="▶ Play", button_type="success")
-reset_btn = pn.widgets.Button(name="⟳ Reset range", button_type="primary", width=130)
-adaptive_cb = pn.widgets.Checkbox(name="Adaptive range", value=False)
-vmin_input = pn.widgets.FloatInput(name="Min", value=0.0, width=100)
-vmax_input = pn.widgets.FloatInput(name="Max", value=1.0, width=100)
+fix_range_cb = pn.widgets.Checkbox(name="Fix color range", value=False)
+vmin_input = pn.widgets.FloatInput(name="Min", value=0.0, width=100, disabled=True)
+vmax_input = pn.widgets.FloatInput(name="Max", value=1.0, width=100, disabled=True)
 
 # Time navigation buttons
 prev_btn = pn.widgets.Button(name="◀ Prev", button_type="default", width=60)
@@ -375,27 +374,26 @@ def get_full_range(variable, level):
     return _range_cache[key]
 
 
-def auto_range(event=None):
-    variable = var_sel.value
-    tidx = parse_time_to_index(time_sel.value)
-    level = level_sel.value
-    if adaptive_cb.value:
-        vals = get_values(variable, tidx, level)
-        if hasattr(vals, "compute"):
-            vals = vals.compute()
-        vmin = float(np.nanpercentile(vals, 2))
-        vmax = float(np.nanpercentile(vals, 98))
-    else:
-        vmin, vmax = get_full_range(variable, level)
+def populate_fixed_range():
+    """Populate vmin/vmax from full-data percentiles for the current variable/level."""
+    vmin, vmax = get_full_range(var_sel.value, level_sel.value)
     vmin_input.value = vmin
     vmax_input.value = vmax
 
+def on_fix_range_change(event):
+    fixing = event.new
+    vmin_input.disabled = not fixing
+    vmax_input.disabled = not fixing
+    if fixing:
+        populate_fixed_range()
+    refresh()
 
 def on_var_change(event):
     _, cmap_default, _, _ = VARS[event.new]
     cmap_sel.value = cmap_default
     _range_cache.clear()
-    auto_range()
+    if fix_range_cb.value:
+        populate_fixed_range()
 
 def on_time_change(event):
     tidx = parse_time_to_index(event.new)
@@ -414,14 +412,11 @@ def next_time(event):
     time_sel.value = TIMES[new_tidx].strftime('%Y-%m-%d %H:%M')
 
 var_sel.param.watch(on_var_change, "value")
-level_sel.param.watch(lambda e: auto_range(), "value")
-time_sel.param.watch(lambda e: auto_range() if adaptive_cb.value else None, "value")
+level_sel.param.watch(lambda e: populate_fixed_range() if fix_range_cb.value else None, "value")
 time_sel.param.watch(on_time_change, "value")
-adaptive_cb.param.watch(lambda e: auto_range(), "value")
-reset_btn.on_click(auto_range)
+fix_range_cb.param.watch(on_fix_range_change, "value")
 prev_btn.on_click(prev_time)
 next_btn.on_click(next_time)
-auto_range()
 
 def get_slice_uda(variable, tidx, level):
     """Return a UgridDataArray slice for hvplot rendering."""
@@ -452,14 +447,14 @@ def get_slice_uda(variable, tidx, level):
 PlotStream = hv.streams.Stream.define(
     "PlotStream",
     variable="temperature", time_str=TIMES[0].strftime('%Y-%m-%d %H:%M'), level=0, cmap="RdYlBu_r",
-    vmin=0.0, vmax=1.0, curr_mode="None", curr_color="white", vector_len=0.5,
+    vmin=0.0, vmax=1.0, fix_range=False, curr_mode="None", curr_color="black", vector_len=2.0,
 )
 ViewportStream = hv.streams.Stream.define("ViewportStream",
     lon_min=LON_MIN, lon_max=LON_MAX, lat_min=LAT_MIN, lat_max=LAT_MAX)
 
 _stream    = PlotStream(
     variable=var_sel.value, time_str=time_sel.value, level=level_sel.value,
-    cmap=cmap_sel.value, vmin=vmin_input.value, vmax=vmax_input.value,
+    cmap=cmap_sel.value, vmin=vmin_input.value, vmax=vmax_input.value, fix_range=fix_range_cb.value,
     curr_mode=curr_mode_sel.value, curr_color=curr_color_sel.value, vector_len=vector_len_sl.value,
 )
 _vp_stream = ViewportStream()
@@ -471,29 +466,32 @@ _last_zoom_t  = [0.0]
 
 _EMPTY_TIPS = {"Longitude": [], "Latitude": [], "angle": []}
 
-def field_layer(variable, time_str, level, cmap, vmin, vmax, curr_mode, curr_color, vector_len):
+def field_layer(variable, time_str, level, cmap, vmin, vmax, fix_range, curr_mode, curr_color, vector_len):
     tidx = parse_time_to_index(time_str)
     da = get_slice_uda(variable, tidx, level)
     return da.hvplot.trimesh(
         geo=True, xlabel="", ylabel="",
     )
 
-def apply_style(el, variable, time_str, level, cmap, vmin, vmax, curr_mode, curr_color, vector_len):
+def apply_style(el, variable, time_str, level, cmap, vmin, vmax, fix_range, curr_mode, curr_color, vector_len):
     tidx = parse_time_to_index(time_str)
     units, _, _, _ = VARS[variable]
     lv_str   = f" L{level}" if "siglay" in ds.dims else ""
     mode_str = f" | {curr_mode}" if curr_mode != "None" else ""
     title = f"FVCOM {variable}{lv_str} | {TIMES[tidx].strftime('%Y-%m-%d %H:%M')}{mode_str}"
-    return el.opts(hv.opts.Image(
-        cmap=cmap, clim=(vmin, vmax), colorbar=True,
+    opts_kwargs = dict(
+        cmap=cmap, colorbar=True,
         colorbar_opts={"title": units}, title=title,
         xlabel="Longitude", ylabel="Latitude",
         tools=["hover"], active_tools=["wheel_zoom"],
         responsive=True, min_height=650,
-    ))
+    )
+    if fix_range:
+        opts_kwargs["clim"] = (vmin, vmax)
+    return el.opts(hv.opts.Image(**opts_kwargs))
 
 def curly_layer(lon_min, lon_max, lat_min, lat_max,
-                variable, time_str, level, cmap, vmin, vmax, curr_mode, curr_color, vector_len):
+                variable, time_str, level, cmap, vmin, vmax, fix_range, curr_mode, curr_color, vector_len):
     if curr_mode != "Curly vectors":
         return hv.Path([], kdims=["Longitude", "Latitude"]).opts(apply_ranges=False)
     tidx = parse_time_to_index(time_str)
@@ -510,7 +508,7 @@ def curly_layer(lon_min, lon_max, lat_min, lat_max,
         return hv.Path([], kdims=["Longitude", "Latitude"]).opts(apply_ranges=False)
 
 def tips_layer(lon_min, lon_max, lat_min, lat_max,
-               variable, time_str, level, cmap, vmin, vmax, curr_mode, curr_color, vector_len):
+               variable, time_str, level, cmap, vmin, vmax, fix_range, curr_mode, curr_color, vector_len):
     if curr_mode != "Curly vectors":
         return hv.Points(_EMPTY_TIPS, kdims=["Longitude", "Latitude"], vdims=["angle"]).opts(apply_ranges=False)
     tidx = parse_time_to_index(time_str)
@@ -530,7 +528,7 @@ def tips_layer(lon_min, lon_max, lat_min, lat_max,
 _EMPTY_VF = (np.array([0.]), np.array([0.]), np.array([0.]), np.array([0.]))
 
 def arrow_layer(lon_min, lon_max, lat_min, lat_max,
-                variable, time_str, level, cmap, vmin, vmax, curr_mode, curr_color, vector_len):
+                variable, time_str, level, cmap, vmin, vmax, fix_range, curr_mode, curr_color, vector_len):
     if curr_mode != "Arrow plot":
         return hv.VectorField(_EMPTY_VF, kdims=["Longitude", "Latitude"],
                               vdims=["Angle", "Magnitude"]).opts(alpha=0, apply_ranges=False)
@@ -556,7 +554,7 @@ def arrow_layer(lon_min, lon_max, lat_min, lat_max,
             kdims=["Longitude", "Latitude"],
             vdims=["Angle", "Magnitude"],
         ).opts(color=curr_color, line_color=curr_color, alpha=0.8,
-               magnitude=hv.dim("Magnitude"), scale=vector_len, apply_ranges=False)
+               magnitude=hv.dim("Magnitude"), scale=1.0/vector_len, apply_ranges=False)
     except Exception as e:
         print(f"[arrow] error: {e}")
         return hv.VectorField(_EMPTY_VF, kdims=["Longitude", "Latitude"],
@@ -614,7 +612,7 @@ plot_pane = pn.pane.HoloViews(plot_obj, sizing_mode="stretch_both", min_height=6
 def refresh(*events):
     _stream.event(
         variable=var_sel.value, time_str=time_sel.value, level=level_sel.value,
-        cmap=cmap_sel.value, vmin=vmin_input.value, vmax=vmax_input.value,
+        cmap=cmap_sel.value, vmin=vmin_input.value, vmax=vmax_input.value, fix_range=fix_range_cb.value,
         curr_mode=curr_mode_sel.value, curr_color=curr_color_sel.value, vector_len=vector_len_sl.value,
     )
 
@@ -630,8 +628,8 @@ sidebar = pn.Column(
     level_sel,
     pn.Spacer(height=8),
     cmap_sel,
+    fix_range_cb,
     pn.Row(vmin_input, vmax_input),
-    pn.Row(reset_btn, adaptive_cb),
     pn.Spacer(height=8),
     curr_mode_sel,
     curr_color_sel,
