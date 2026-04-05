@@ -98,12 +98,8 @@ def open_icechunk(href):
 
 def maybe_wrap_xugrid(ds):
     if hasattr(ds, "ugrid_roles") and ds.ugrid_roles.topology:
-        if "nv" in ds and ds.nv.dims == ("three", "nele"):
-            ds["nv"] = ds["nv"].transpose("nele", "three")
         return xu.UgridDataset(ds)
     try:
-        if "nv" in ds and ds.nv.dims == ("three", "nele"):
-            ds["nv"] = ds["nv"].transpose("nele", "three")
         return xu.UgridDataset(ds)
     except Exception:
         return xu.UgridDataset(add_ugrid_metadata(ds))
@@ -128,13 +124,11 @@ def add_ugrid_metadata(ds):
     else:
         ds[mesh_name].attrs.update(mesh_attrs)
 
-    if "nv" in ds and ds.nv.dims == ("three", "nele"):
-        ds["nv"] = ds["nv"].transpose("nele", "three")
-
     if "nv" in ds:
         ds.nv.attrs.update({
             "cf_role": "face_node_connectivity",
-            "start_index": 1
+            "start_index": 1,
+            "face_dimension": "nele",
         })
 
     for var in ds.data_vars:
@@ -153,16 +147,15 @@ asset_href = pick_icechunk_href(item)
 print(f"Opening icechunk href: {asset_href}")
 ds = open_icechunk(asset_href)
 
-# Extract topology from raw xarray Dataset BEFORE wrapping — once xugrid
-# consumes the dataset, nv/lonc/latc disappear as addressable variables.
-LON  = ds["lon"].values.astype(float)
-LAT  = ds["lat"].values.astype(float)
-LONC = ds["lonc"].values.astype(float)  # face centroids — where FVCOM u/v live
-LATC = ds["latc"].values.astype(float)
-_nv  = ds["nv"].values
-ELEM = (_nv if _nv.shape[1] == 3 else _nv.T) - 1  # ensure (nele, 3), 0-based
+ds = maybe_wrap_xugrid(ds)
 
-ds = maybe_wrap_xugrid(ds)  # now wrap for hvplot rendering
+# Extract topology from the xugrid grid object
+grid = ds.grids[0]
+LON  = grid.node_x.astype(float)
+LAT  = grid.node_y.astype(float)
+LONC = grid.face_x.astype(float)   # face centroids — where FVCOM u/v live
+LATC = grid.face_y.astype(float)
+ELEM = grid.face_node_connectivity  # (nele, 3), 0-based
 
 LON_MIN, LON_MAX = float(LON.min()), float(LON.max())
 LAT_MIN, LAT_MAX = float(LAT.min()), float(LAT.max())
@@ -565,7 +558,7 @@ def arrow_layer(lon_min, lon_max, lat_min, lat_max,
             kdims=["Longitude", "Latitude"],
             vdims=["Angle", "Magnitude"],
         ).opts(color=curr_color, line_color=curr_color, alpha=0.8,
-               scale=vector_len, apply_ranges=False)
+               magnitude=hv.dim("Magnitude"), scale=vector_len, apply_ranges=False)
     except Exception as e:
         print(f"[arrow] error: {e}")
         return hv.VectorField(_EMPTY_VF, kdims=["Longitude", "Latitude"],
