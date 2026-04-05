@@ -476,8 +476,6 @@ def field_layer(variable, time_str, level, cmap, vmin, vmax, curr_mode, curr_col
     da = get_slice_uda(variable, tidx, level)
     return da.hvplot.trimesh(
         geo=True, xlabel="", ylabel="",
-        xlim=(LON_MIN - PAD, LON_MAX + PAD),
-        ylim=(LAT_MIN - PAD, LAT_MAX + PAD),
     )
 
 def apply_style(el, variable, time_str, level, cmap, vmin, vmax, curr_mode, curr_color, vector_len):
@@ -524,7 +522,7 @@ def tips_layer(lon_min, lon_max, lat_min, lat_max,
             {"Longitude": tip_mx.tolist(), "Latitude": tip_my.tolist(),
              "angle": np.degrees(tangs).tolist()},
             kdims=["Longitude", "Latitude"], vdims=["angle"],
-        ).opts(marker="triangle", color="white", size=8,
+        ).opts(marker="triangle", color=curr_color, size=8,
                angle=hv.dim("angle"), alpha=0.9, apply_ranges=False)
     except Exception:
         return hv.Points(_EMPTY_TIPS, kdims=["Longitude", "Latitude"], vdims=["angle"]).opts(apply_ranges=False)
@@ -606,7 +604,8 @@ tips_dmap  = hv.DynamicMap(tips_layer,  streams=[_vp_stream, _stream])
 arrow_dmap = hv.DynamicMap(arrow_layer, streams=[_vp_stream, _stream])
 
 plot_obj  = (tiles * styled * curly_dmap * tips_dmap * arrow_dmap).opts(
-    hv.opts.Overlay(responsive=True, min_height=650)
+    hv.opts.Overlay(responsive=True, min_height=650,
+                    backend_opts={"plot.match_aspect": True})
 )
 plot_pane = pn.pane.HoloViews(plot_obj, sizing_mode="stretch_both", min_height=650)
 
