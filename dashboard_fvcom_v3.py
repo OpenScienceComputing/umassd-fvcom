@@ -398,8 +398,7 @@ class FVCOMDashboard(pn.viewable.Viewer):
         title    = f"FVCOM {variable}{lv_str} | {TIMES[time_idx].strftime('%Y-%m-%d %H:%M')}{mode_str}"
         clim_kw  = {} if self._autoscale_w.value else {"clim": (vmin, vmax)}
         return el.opts(hv.opts.Image(
-            cmap=cmap, colorbar=True,
-            colorbar_opts={"title": units}, title=title,
+            cmap=cmap, colorbar=True, clabel=units, title=title,
             xlabel="Longitude", ylabel="Latitude",
             tools=["hover"], active_tools=["wheel_zoom"],
             responsive=True, min_height=650,
