@@ -403,8 +403,17 @@ class FVCOMDashboard(pn.viewable.Viewer):
         mode_str = f" | {curr_mode}" if curr_mode != "None" else ""
         title    = f"FVCOM {variable}{lv_str} | {TIMES[time_idx].strftime('%Y-%m-%d %H:%M')}{mode_str}"
         clim_kw  = {} if self._autoscale_w.value else {"clim": (vmin, vmax)}
+        # clabel sets the colorbar title on the INITIAL render, but Bokeh reuses
+        # the existing ColorBar model on stream updates and never re-patches its
+        # title. A hook runs on both initialize_plot and update_frame, so it
+        # keeps the colorbar unit label in sync when the variable changes.
+        def _sync_cbar_title(plot, element):
+            cbar = plot.handles.get("colorbar")
+            if cbar is not None:
+                cbar.title = units
         return el.opts(hv.opts.Image(
             cmap=cmap, colorbar=True, clabel=units, title=title,
+            hooks=[_sync_cbar_title],
             xlabel="Longitude", ylabel="Latitude",
             tools=["hover"], active_tools=["wheel_zoom"],
             responsive=True, min_height=650,
