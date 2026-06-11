@@ -250,7 +250,7 @@ class FVCOMDashboard(pn.viewable.Viewer):
         # Build DynamicMaps
         _tiles  = hv.element.tiles.OSM()
         _field  = hv.DynamicMap(self._field_layer, streams=[self._plot_stream])
-        _rast   = hv_rasterize(_field)
+        _rast   = hv_rasterize(_field).redim(**{"x_y z": "value"})
         _styled = _rast.apply(self._apply_style, streams=[self._plot_stream])
 
         self._rxy = next((s for s in _rast.streams if isinstance(s, hv.streams.RangeXY)), None)
@@ -384,6 +384,12 @@ class FVCOMDashboard(pn.viewable.Viewer):
     def _field_layer(self, variable, time_idx, level, cmap, vmin, vmax,
                      curr_mode, curr_color, vector_len):
         da = self._get_slice_uda(variable, time_idx, level)
+        units, _, _, _ = VARS[variable]
+        # Fixed name "z" → datashader always produces vdim "x_y z" → renamed
+        # to "value" on the DynamicMap. Override units attr so hvplot uses the
+        # correct label (e.g. "°C") rather than the raw FVCOM attr ("C").
+        da = da.rename("z")
+        da.attrs["units"] = units
         return da.hvplot.trimesh(
             geo=True, xlabel="", ylabel="",
             xlim=(LON_MIN - PAD, LON_MAX + PAD),
@@ -397,18 +403,8 @@ class FVCOMDashboard(pn.viewable.Viewer):
         mode_str = f" | {curr_mode}" if curr_mode != "None" else ""
         title    = f"FVCOM {variable}{lv_str} | {TIMES[time_idx].strftime('%Y-%m-%d %H:%M')}{mode_str}"
         clim_kw  = {} if self._autoscale_w.value else {"clim": (vmin, vmax)}
-        if el.vdims:
-            el = el.redim(**{el.vdims[0].name: "value"})
-        # clabel sets the title on initial render but Bokeh doesn't propagate
-        # it to the existing ColorBar model on updates — the hook does that.
-        def _colorbar_title(plot, element):
-            from bokeh.models import ColorBar
-            for m in plot.state.right:
-                if isinstance(m, ColorBar):
-                    m.title = units
         return el.opts(hv.opts.Image(
             cmap=cmap, colorbar=True, clabel=units, title=title,
-            hooks=[_colorbar_title],
             xlabel="Longitude", ylabel="Latitude",
             tools=["hover"], active_tools=["wheel_zoom"],
             responsive=True, min_height=650,
