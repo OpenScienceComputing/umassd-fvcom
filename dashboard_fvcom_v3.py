@@ -220,7 +220,8 @@ class FVCOMDashboard(pn.viewable.Viewer):
         self._autoscale_w  = pmui.Switch(label="Autoscale", value=True)
         self._prev_btn     = pmui.Button(label="◀", width=50, color="default")
         self._next_btn     = pmui.Button(label="▶", width=50, color="default")
-        self._play_btn     = pmui.Toggle(label="▶  Play", color="success")
+        self._play_btn     = pmui.Button(label="▶ Play", color="success")
+        self._pause_btn    = pmui.Button(label="⏸ Pause", color="warning", disabled=True)
 
         super().__init__(**params)
 
@@ -245,7 +246,8 @@ class FVCOMDashboard(pn.viewable.Viewer):
         # Buttons
         self._prev_btn.on_click(self._on_prev)
         self._next_btn.on_click(self._on_next)
-        self._play_btn.param.watch(self._on_play_toggle, "value")
+        self._play_btn.on_click(self._on_play)
+        self._pause_btn.on_click(self._on_pause)
 
         # Build DynamicMaps
         _tiles  = hv.element.tiles.OSM()
@@ -274,7 +276,7 @@ class FVCOMDashboard(pn.viewable.Viewer):
                 self._date_range_label,
                 self._date_input_w,
                 self._time_label,
-                pn.Row(self._prev_btn, self._next_btn, self._play_btn),
+                pn.Row(self._prev_btn, self._next_btn, self._play_btn, self._pause_btn),
                 self._level_w,
                 pmui.Divider(),
                 self._cmap_w,
@@ -625,17 +627,23 @@ class FVCOMDashboard(pn.viewable.Viewer):
     def _on_next(self, event):
         self._set_time_idx(self._time_idx + 1)
 
-    def _on_play_toggle(self, event):
-        if event.new:
-            self._play_cb = pn.state.add_periodic_callback(self._play_step, period=500)
-        else:
-            if self._play_cb:
-                self._play_cb.stop()
-                self._play_cb = None
+    def _on_play(self, event):
+        if self._play_cb is not None:
+            return  # already playing
+        self._play_cb = pn.state.add_periodic_callback(self._play_step, period=500)
+        self._play_btn.disabled = True
+        self._pause_btn.disabled = False
+
+    def _on_pause(self, event):
+        if self._play_cb is not None:
+            self._play_cb.stop()
+            self._play_cb = None
+        self._play_btn.disabled = False
+        self._pause_btn.disabled = True
 
     def _play_step(self):
         if self._time_idx + 1 >= N_TIMES:
-            self._play_btn.value = False
+            self._on_pause(None)  # reached the end — stop and reset buttons
             return
         self._set_time_idx(self._time_idx + 1)
 
