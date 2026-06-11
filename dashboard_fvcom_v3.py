@@ -397,6 +397,8 @@ class FVCOMDashboard(pn.viewable.Viewer):
         mode_str = f" | {curr_mode}" if curr_mode != "None" else ""
         title    = f"FVCOM {variable}{lv_str} | {TIMES[time_idx].strftime('%Y-%m-%d %H:%M')}{mode_str}"
         clim_kw  = {} if self._autoscale_w.value else {"clim": (vmin, vmax)}
+        if el.vdims:
+            el = el.redim(**{el.vdims[0].name: "value"})
         # clabel sets the title on initial render but Bokeh doesn't propagate
         # it to the existing ColorBar model on updates — the hook does that.
         def _colorbar_title(plot, element):
