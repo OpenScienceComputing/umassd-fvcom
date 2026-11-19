@@ -23,7 +23,7 @@ data. Icechunk records byte-range references into the original NetCDF files as
 
 Published store (anonymous read):
 ```
-s3://umassd-fvcom/gom3/hindcast/icechunk/gom3-whole-nochunk.icechunk
+s3://umassd-fvcom/gom3/hindcast/icechunk/gom3-whole-nochunk-v2.icechunk
 ```
 
 ### How the references are built
@@ -74,7 +74,7 @@ import icechunk
 import xarray as xr
 
 bucket = 'umassd-fvcom'
-prefix = 'gom3/hindcast/icechunk/gom3-whole-nochunk.icechunk'
+prefix = 'gom3/hindcast/icechunk/gom3-whole-nochunk-v2.icechunk'
 region = 'us-east-1'
 
 # Tell Icechunk the virtual chunks in this bucket are fetched anonymously
